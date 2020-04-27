@@ -39,4 +39,13 @@ typedef enum _R3_RESULT
 	R3Result_DefaultNon,
 }R3_RESULT;
 
+typedef NTSTATUS(*QUERY_INFO_PROCESS) (
+	__in HANDLE ProcessHandle,
+	__in PROCESSINFOCLASS ProcessInformationClass,
+	__out_bcount(ProcessInformationLength) PVOID ProcessInformation,
+	__in ULONG ProcessInformationLength,
+	__out_opt PULONG ReturnLength
+	);
+
+
 R3_RESULT __stdcall GetResultFromUser();

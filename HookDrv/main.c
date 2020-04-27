@@ -1,11 +1,4 @@
-#include <ntifs.h>
-#include <ntddk.h>
-#include <ntstrsafe.h>
-#include <windef.h>
-#include <ntimage.h>
-#include "ioctlcmd.h"
-#include "main.h"
-#include "hook.h"
+#include "precomp.h"
 
 #define		DEVICE_NAME		L"\\device\\HookDrv"
 #define		LINK_NAME		L"\\dosDevices\\HookDrv"
@@ -22,6 +15,7 @@ LIST_ENTRY g_PendingIrpList;
 ERESOURCE  g_PendingIrpListLock;
 //等待的ID 用于标识
 ULONG g_ulWaitID = 0;
+
 
 /*        锁和操作list的函数         */
 VOID __stdcall LockWrite(ERESOURCE *lpLock)
@@ -77,7 +71,7 @@ VOID __stdcall InitList(LIST_ENTRY *list)
 
 
 //结束Irp
-VOID IrpCancel(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp)
+VOID IrpCancel(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 {
 	KIRQL				CancelOldIrql = Irp->CancelIrql;
 
@@ -104,7 +98,7 @@ VOID PendingIrpToList(PIRP lpIrp, PLIST_ENTRY lpIrpList, PDRIVER_CANCEL lpfnCanc
 
 
 //处理应用层的read()函数
-NTSTATUS DispatchRead(IN PDEVICE_OBJECT	pDevObj,IN PIRP	lpIrp)
+NTSTATUS DispatchRead(IN PDEVICE_OBJECT	pDevObj, IN PIRP	lpIrp)
 {
 	NTSTATUS			ntStatus = STATUS_SUCCESS;
 	ULONG				ulLength = 0;
@@ -224,7 +218,7 @@ BOOLEAN CompletePendingIrp(LIST_ENTRY* pIrpListHead, OP_INFO* lpOpInfo)
 	return bRet;
 }
 
-R3_RESULT __stdcall GetResultFromUser()
+R3_RESULT __stdcall GetResultFromUser(PWCH processName)
 {
 	R3_RESULT			NotifyResult = R3Result_Pass;
 	BOOLEAN				bSuccess = FALSE;
@@ -233,6 +227,10 @@ R3_RESULT __stdcall GetResultFromUser()
 	OP_INFO				*lpNewOpInfo = NULL;
 	WAIT_LIST_ENTRY		*lpNewWaitEntry = NULL;
 	ULONG_PTR ulPtr = 0;
+	UNICODE_STRING pPath = { 0 };
+	WCHAR	szCopiedStr[1024] = L"";
+	HANDLE ProcessHandle = NULL;
+
 
 	lpNewOpInfo = (OP_INFO*)ExAllocatePool(PagedPool, sizeof(OP_INFO));
 
@@ -240,11 +238,26 @@ R3_RESULT __stdcall GetResultFromUser()
 	{
 		return NotifyResult;
 	}
+	RtlInitUnicodeString(&pPath, szCopiedStr);
+	pPath.MaximumLength = sizeof(szCopiedStr);
+
+	ProcessHandle = PsGetCurrentProcessId();
 
 	//设置事件相关的数据，发送给R3，比如进程ID，名字，路径，以及具体操作（创建，修改，删除）等等
 	//当然，这里，我们只是简单的捕捉了进程的ID或者名字等
-	ulPtr = (ULONG_PTR)PsGetCurrentProcessId();
+	ulPtr = (ULONG_PTR)ProcessHandle;
+	
+
 	lpNewOpInfo->m_ulProcessID = (ULONG_PTR)ulPtr;
+	//拷贝真正的进程
+	if (processName != NULL){
+		RtlCopyMemory(lpNewOpInfo->m_ProcessName, processName, MAX_PATH);
+	}
+	else
+	{
+		GetProcessFullNameByPid(ProcessHandle, &pPath);
+		RtlCopyMemory(lpNewOpInfo->m_ProcessName, pPath.Buffer, pPath.Length);
+	}
 
 	lpNewOpInfo->m_ulWaitID = MakeWaitID();//区别不同事件的ID
 
@@ -317,7 +330,7 @@ End:
 
 
 //处理应用层的DeviceIoControl()
-NTSTATUS DispatchControl(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp)
+NTSTATUS DispatchControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 {
 	PIO_STACK_LOCATION      	lpIrpStack = NULL;
 	PVOID                   	inputBuffer = NULL;
@@ -376,7 +389,7 @@ NTSTATUS DispatchControl(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp)
 		R3_RESULT notifyResult = R3Result_DefaultNon;
 
 
-		notifyResult = GetResultFromUser();//从R3获得弹框结果，是阻止还是放过
+		notifyResult = GetResultFromUser(NULL);//从R3获得弹框结果，是阻止还是放过
 		if (notifyResult == R3Result_Block)
 		{
 			DbgPrint("阻止\n");
@@ -415,7 +428,7 @@ VOID DriverUnload(
 {
 	UNICODE_STRING         deviceLink = { 0 };
 
-	//RemoveHook();
+	RemoveHook();
 
 	DeleteLock(&g_OperListLock);
 	DeleteLock(&g_WaitListLock);
@@ -513,7 +526,7 @@ NTSTATUS DriverEntry(
 		IoDeleteDevice(pDevObj);
 		return status;
 	}
-	//StartHook();
+	StartHook();
 
 	DbgPrint("Driver Load success!\n");
 	return status;

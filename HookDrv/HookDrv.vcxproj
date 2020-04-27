@@ -149,11 +149,14 @@
   <ItemGroup>
     <ClCompile Include="hook.c" />
     <ClCompile Include="main.c" />
+    <ClCompile Include="misc.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="hook.h" />
     <ClInclude Include="ioctlcmd.h" />
     <ClInclude Include="main.h" />
+    <ClInclude Include="misc.h" />
+    <ClInclude Include="precomp.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
