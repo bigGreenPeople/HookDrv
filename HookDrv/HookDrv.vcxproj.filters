@@ -38,5 +38,8 @@
     <ClInclude Include="hook.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ioctlcmd.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
