@@ -231,7 +231,7 @@ R3_RESULT __stdcall GetResultFromUser(PWCH processName)
 	WCHAR	szCopiedStr[1024] = L"";
 	HANDLE ProcessHandle = NULL;
 
-
+	
 	lpNewOpInfo = (OP_INFO*)ExAllocatePool(PagedPool, sizeof(OP_INFO));
 
 	if (lpNewOpInfo == NULL)
@@ -284,6 +284,7 @@ R3_RESULT __stdcall GetResultFromUser(PWCH processName)
 	bSuccess = CompletePendingIrp(&g_PendingIrpList, lpNewOpInfo);//查看是否有未完成的pendingIRP，直接将该OperInfo传给R3
 	UnLockWrite(&g_PendingIrpListLock);
 
+	//判断g_PendingIrpList里面如果为Null
 	if (bSuccess == FALSE)	//完成pending irp失败，将lpNewOpInfo插入operlist
 	{
 		LockWrite(&g_OperListLock);
