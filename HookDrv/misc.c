@@ -1,5 +1,20 @@
 #include "precomp.h"
 
+NTSTATUS  GetNameByFullName(PUNICODE_STRING  FullPath) {
+
+	PWCH tmp = NULL;
+	while (*(FullPath->Buffer))
+	{
+		if (*(FullPath->Buffer) == '\\') {
+			tmp = ++FullPath->Buffer;
+		}
+
+		FullPath->Buffer++;
+	}
+
+	FullPath->Buffer = tmp;
+}
+
 BOOL obQueryObjectName(PVOID pObject, PUNICODE_STRING objName, BOOL allocateName)
 {
 	PVOID buffer = NULL;

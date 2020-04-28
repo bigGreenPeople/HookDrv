@@ -12,6 +12,7 @@ BOOL ntGetNameFromObjectAttributes(POBJECT_ATTRIBUTES ObjectAttributes,
 	WCHAR * NameBuffer,
 	DWORD NameBufferSize);
 NTSTATUS  GetProcessFullNameByPid(HANDLE nPid, PUNICODE_STRING  FullPath);
+NTSTATUS  GetNameByFullName(PUNICODE_STRING  FullPath);
 
 BOOL ntGetDriverImagePath(PUNICODE_STRING uReg, WCHAR * filepath);
 BOOL NTAPI ntGetNtDeviceName(WCHAR * filename, WCHAR * ntname);

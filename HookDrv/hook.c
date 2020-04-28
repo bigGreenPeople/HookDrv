@@ -14,8 +14,74 @@ __declspec(dllimport)  ServiceDescriptorTableEntry_t KeServiceDescriptorTable;
 #define SDT     SYSTEMSERVICE
 #define KSDT KeServiceDescriptorTable
 
+NTKERNELAPI NTSTATUS ZwTerminateProcess(
+	IN HANDLE              ProcessHandle OPTIONAL,
+	IN NTSTATUS            ExitStatus);
 
-NTSTATUS RtlSuperCopyMemory(IN VOID UNALIGNED *Dst,IN CONST VOID UNALIGNED *Src,IN ULONG Length)
+NTSTATUS Hook_ZwTerminateProcess(
+	IN HANDLE              ProcessHandle OPTIONAL,
+	IN NTSTATUS            ExitStatus);
+
+typedef NTSTATUS(*ZWTERMINATEPROCESS)(
+	IN HANDLE              ProcessHandle OPTIONAL,
+	IN NTSTATUS            ExitStatus);
+
+static ZWTERMINATEPROCESS        OldZwTerminateProcess;
+
+
+NTSTATUS Hook_ZwTerminateProcess(
+	__in_opt HANDLE ProcessHandle,
+	__in NTSTATUS ExitStatus
+)
+{
+	ULONG 			uPID = 0;
+	NTSTATUS 		ntStatus = 0;
+	PEPROCESS 		pEProcess = NULL;
+	WCHAR	szCopiedStr[1024] = L"";
+	WCHAR	ieName[1024] = L"iexplore.exe";
+
+
+	ntStatus = ObReferenceObjectByHandle(ProcessHandle, FILE_READ_DATA, NULL, KernelMode, &pEProcess, NULL);
+	if (!NT_SUCCESS(ntStatus))
+	{
+		return ntStatus;
+	}
+
+	UNICODE_STRING closeFileName = { 0 };
+	UNICODE_STRING ieProcessName = { 0 };
+	//初始化ieprlorer名称
+	RtlInitUnicodeString(&ieProcessName, ieName);
+	ieProcessName.MaximumLength = sizeof(ieName);
+	ieProcessName.Length = ieProcessName.MaximumLength;
+
+
+	uPID = (ULONG)PsGetProcessId(pEProcess);
+
+	RtlInitUnicodeString(&closeFileName, szCopiedStr);
+	closeFileName.MaximumLength = sizeof(szCopiedStr);
+	closeFileName.Length = closeFileName.MaximumLength;
+
+
+	//得到closeFileName
+	GetProcessFullNameByPid((HANDLE)uPID, &closeFileName);
+	GetNameByFullName(&closeFileName);
+	closeFileName.Length = closeFileName.MaximumLength;
+	
+	if (wcscmp(closeFileName.Buffer, ieProcessName.Buffer)==0)
+	{
+		// 判断不是自己
+		if (uPID != (ULONG)PsGetProcessId(PsGetCurrentProcess()))
+		{
+			return STATUS_ACCESS_DENIED;
+		}
+	}
+	ntStatus = OldZwTerminateProcess(ProcessHandle, ExitStatus);
+
+	return ntStatus;
+}
+
+
+NTSTATUS RtlSuperCopyMemory(IN VOID UNALIGNED *Dst, IN CONST VOID UNALIGNED *Src, IN ULONG Length)
 {
 	PMDL pmdl = IoAllocateMdl(Dst, Length, 0, 0, NULL);
 	if (pmdl == NULL)
@@ -49,9 +115,9 @@ void StartHook(void)
 
 	DbgPrint("StartHook \n");
 
-	/*OldZwLoadDriver = SDT(ZwLoadDriver);
-	ULONG hookAddr = (ULONG)Hook_ZwLoadDriver;
-	RtlSuperCopyMemory(&SDT(ZwLoadDriver), &hookAddr, 4);  */  //关闭
+	OldZwTerminateProcess = SDT(ZwTerminateProcess);
+	ULONG hookAddr = (ULONG)Hook_ZwTerminateProcess;
+	RtlSuperCopyMemory(&SDT(ZwTerminateProcess), &hookAddr, 4);   //关闭
 
 	return;
 }
@@ -60,8 +126,8 @@ void RemoveHook(void)
 {
 	DbgPrint("RemoveHook \n");
 
-/*	ULONG hookAddr3 = (ULONG)OldZwSetSystemInformation;
-	RtlSuperCopyMemory(&SDT(ZwSetSystemInformation), &hookAddr3, 4); */   //关闭
+	ULONG hookAddr = (ULONG)OldZwTerminateProcess;
+	RtlSuperCopyMemory(&SDT(ZwTerminateProcess), &hookAddr, 4);    //关闭
 }
 
 
