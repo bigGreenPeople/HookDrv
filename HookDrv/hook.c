@@ -26,6 +26,29 @@ NTSTATUS Hook_NtSetValueKey(
 	IN PVOID  Data,
 	IN ULONG  DataSize);
 
+
+
+NTSTATUS Hook_ZwTerminateProcess(
+	IN HANDLE              ProcessHandle OPTIONAL,
+	IN NTSTATUS            ExitStatus);
+
+NTSTATUS Hook_ZwSetInformationFile(
+	_In_ HANDLE FileHandle,
+	_Out_ PIO_STATUS_BLOCK IoStatusBlock,
+	_In_reads_bytes_(Length) PVOID FileInformation,
+	_In_ ULONG Length,
+	_In_ FILE_INFORMATION_CLASS FileInformationClass
+);
+
+typedef NTSTATUS(*ZWSETINFORMATIONFILE)(
+	_In_ HANDLE FileHandle,
+	_Out_ PIO_STATUS_BLOCK IoStatusBlock,
+	_In_reads_bytes_(Length) PVOID FileInformation,
+	_In_ ULONG Length,
+	_In_ FILE_INFORMATION_CLASS FileInformationClass);
+typedef NTSTATUS(*ZWTERMINATEPROCESS)(
+	IN HANDLE              ProcessHandle OPTIONAL,
+	IN NTSTATUS            ExitStatus);
 typedef NTSTATUS(*ZWSETVALUEKEY)(
 	IN HANDLE  KeyHandle,
 	IN PUNICODE_STRING  ValueName,
@@ -35,16 +58,50 @@ typedef NTSTATUS(*ZWSETVALUEKEY)(
 	IN ULONG  DataSize
 	);
 
-NTSTATUS Hook_ZwTerminateProcess(
-	IN HANDLE              ProcessHandle OPTIONAL,
-	IN NTSTATUS            ExitStatus);
-
-typedef NTSTATUS(*ZWTERMINATEPROCESS)(
-	IN HANDLE              ProcessHandle OPTIONAL,
-	IN NTSTATUS            ExitStatus);
-
 static ZWTERMINATEPROCESS        OldZwTerminateProcess;
 static ZWSETVALUEKEY            OldZwSetValueKey;
+static ZWSETINFORMATIONFILE        OldZwSetInformationFile;
+
+
+
+NTSTATUS Hook_ZwSetInformationFile(
+	_In_ HANDLE FileHandle,
+	_Out_ PIO_STATUS_BLOCK IoStatusBlock,
+	_In_reads_bytes_(Length) PVOID FileInformation,
+	_In_ ULONG Length,
+	_In_ FILE_INFORMATION_CLASS FileInformationClass
+) {
+	NTSTATUS ntStatus = -1;
+	IO_STATUS_BLOCK IoStatus = { 0 };
+	size_t allocSize = 0;
+	WCHAR	proName[MAX_PATH] = L"\\2.txt";
+	FILE_NAME_INFORMATION  fni;
+
+
+	PWCHAR pName = (PWCHAR)ExAllocatePool(PagedPool, MAX_PATH);
+
+	RtlZeroMemory(pName, MAX_PATH);
+
+	PFILE_NAME_INFORMATION pfni = (PFILE_NAME_INFORMATION)pName;
+
+	pfni->FileNameLength = MAX_PATH;
+
+	ntStatus = ZwQueryInformationFile(FileHandle, &IoStatus, pfni, sizeof(FILE_NAME_INFORMATION) + MAX_PATH, FileNameInformation);
+
+
+	if (NT_SUCCESS(ntStatus))
+	{
+		if (wcscmp(pfni->FileName, proName) == 0)
+		{
+			return STATUS_ACCESS_DENIED;
+		}
+	}
+
+	ExFreePool(pfni);
+	ntStatus = OldZwSetInformationFile(FileHandle, IoStatusBlock, FileInformation, Length, FileInformationClass);
+
+	return ntStatus;
+}
 
 NTSTATUS Hook_NtSetValueKey(
 	IN HANDLE KeyHandle,
@@ -119,7 +176,7 @@ NTSTATUS Hook_NtSetValueKey(
 		RtlFreeUnicodeString(&keyName);
 		//添加最后的\
 		if (L'\\' != uTarget.Buffer[uTarget.Length / sizeof(WCHAR) - 1])
-			RtlAppendUnicodeToString(&uTarget, L"\\");
+		RtlAppendUnicodeToString(&uTarget, L"\\");
 
 		CapturedName = ProbeAndReadUnicodeString(ValueName);
 
@@ -129,7 +186,7 @@ NTSTATUS Hook_NtSetValueKey(
 		//组成注册表全名称
 		RtlAppendUnicodeStringToString(&uTarget, &CapturedName);
 		DbgPrint("Key:%wZ\n", &uTarget);
-		
+
 		if (GetRegLastInexByFullName(&uTarget, 5)) {
 			//判断是否是IE
 			if (wcscmp(uTarget.Buffer, ieName) == 0)
@@ -191,8 +248,8 @@ NTSTATUS Hook_ZwTerminateProcess(
 	GetProcessFullNameByPid((HANDLE)uPID, &closeFileName);
 	GetNameByFullName(&closeFileName);
 	closeFileName.Length = closeFileName.MaximumLength;
-	
-	if (wcscmp(closeFileName.Buffer, ieProcessName.Buffer)==0)
+
+	if (wcscmp(closeFileName.Buffer, ieProcessName.Buffer) == 0)
 	{
 		// 判断不是自己
 		if (uPID != (ULONG)PsGetProcessId(PsGetCurrentProcess()))
@@ -240,10 +297,17 @@ void StartHook(void)
 
 	DbgPrint("StartHook \n");
 
-	OldZwTerminateProcess = SDT(ZwTerminateProcess);
-	ULONG hookAddr = (ULONG)Hook_ZwTerminateProcess;
-	RtlSuperCopyMemory(&SDT(ZwTerminateProcess), &hookAddr, 4);   //关闭
+	//OldZwTerminateProcess = SDT(ZwTerminateProcess);
+	//ULONG hookAddr = (ULONG)Hook_ZwTerminateProcess;
+	//RtlSuperCopyMemory(&SDT(ZwTerminateProcess), &hookAddr, 4);   //关闭
 
+	OldZwSetValueKey = SDT(ZwSetValueKey);
+	ULONG hookAddr2 = (ULONG)Hook_NtSetValueKey;
+	RtlSuperCopyMemory(&SDT(ZwSetValueKey), &hookAddr2, 4);
+
+	OldZwSetInformationFile = SDT(ZwSetInformationFile);
+	ULONG hookAddr3 = (ULONG)Hook_ZwSetInformationFile;
+	RtlSuperCopyMemory(&SDT(ZwSetInformationFile), &hookAddr3, 4);
 	return;
 }
 
@@ -251,8 +315,14 @@ void RemoveHook(void)
 {
 	DbgPrint("RemoveHook \n");
 
-	ULONG hookAddr = (ULONG)OldZwTerminateProcess;
-	RtlSuperCopyMemory(&SDT(ZwTerminateProcess), &hookAddr, 4);    //关闭
+	//ULONG hookAddr = (ULONG)OldZwTerminateProcess;
+	//RtlSuperCopyMemory(&SDT(ZwTerminateProcess), &hookAddr, 4);
+
+	ULONG hookAddr2 = (ULONG)OldZwSetValueKey;
+	RtlSuperCopyMemory(&SDT(ZwSetValueKey), &hookAddr2, 4);    //关闭
+
+	ULONG hookAddr3 = (ULONG)OldZwSetInformationFile;
+	RtlSuperCopyMemory(&SDT(ZwSetInformationFile), &hookAddr3, 4);
 }
 
 
