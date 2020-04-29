@@ -1,5 +1,28 @@
 #include "precomp.h"
 
+//得到最后index个斜杠的字符串
+BOOL  GetRegLastInexByFullName(PUNICODE_STRING  FullPath, int Index) {
+
+	PWCH tmp = FullPath->Buffer;
+
+	while (*tmp) { tmp++; }
+
+	int IndexNum = 0;
+
+	while (tmp != FullPath->Buffer)
+	{
+		if (*tmp == '\\') {
+			IndexNum++;
+			if (IndexNum == Index) {
+				FullPath->Buffer = tmp;
+				return TRUE;
+			}
+		}
+		tmp--;
+	}
+	return FALSE;
+}
+
 NTSTATUS  GetNameByFullName(PUNICODE_STRING  FullPath) {
 
 	PWCH tmp = NULL;
@@ -14,6 +37,112 @@ NTSTATUS  GetNameByFullName(PUNICODE_STRING  FullPath) {
 
 	FullPath->Buffer = tmp;
 }
+
+
+BOOL MyProbeKeyHandle(HANDLE KeyHandle, DWORD Access)
+{
+	NTSTATUS status = 0;
+	PVOID KeyObj = NULL;
+
+	status = ObReferenceObjectByHandle(
+		KeyHandle,
+		Access,
+		NULL,
+		ExGetPreviousMode(),
+		&KeyObj,
+		NULL
+	);
+
+	if (NT_SUCCESS(status))
+	{
+		ObDereferenceObject(KeyObj);
+		return TRUE;
+	}
+	if (status == STATUS_ACCESS_DENIED)
+		return TRUE;
+
+	return FALSE;
+}
+
+BOOL MyObQueryObjectName(HANDLE objHandle, PUNICODE_STRING objName, BOOL allocateName)
+{
+	PVOID buffer = NULL;
+	DWORD reqSize = 0;
+	NTSTATUS status = 0;
+	__try
+	{
+		reqSize = sizeof(OBJECT_NAME_INFORMATION) + (MAX_PATH + 32) * sizeof(WCHAR);
+
+		buffer = ExAllocatePoolWithTag(PagedPool, reqSize, 'SGER');
+
+		if (buffer == NULL)
+			return FALSE;
+
+		status = ZwQueryObject(objHandle,
+			ObjectNameInfo,
+			buffer,
+			reqSize,
+			&reqSize);
+
+		if ((status == STATUS_INFO_LENGTH_MISMATCH) ||
+			(status == STATUS_BUFFER_OVERFLOW) ||
+			(status == STATUS_BUFFER_TOO_SMALL))
+		{
+			ExFreePool(buffer);
+			buffer = NULL;
+
+			buffer = ExAllocatePoolWithTag(PagedPool, reqSize, 'SGER');
+
+			if (buffer == NULL)
+			{
+				return FALSE;
+			}
+
+			status = ZwQueryObject(objHandle,
+				ObjectNameInfo,
+				buffer,
+				reqSize,
+				&reqSize);
+
+		}
+
+		if (NT_SUCCESS(status))
+		{
+			OBJECT_NAME_INFORMATION * pNameInfo = (OBJECT_NAME_INFORMATION *)buffer;
+
+			if (allocateName)
+			{
+				objName->Buffer = ExAllocatePoolWithTag(PagedPool, pNameInfo->Name.Length + sizeof(WCHAR), 'SGER');
+
+				if (objName->Buffer)
+				{
+					RtlZeroMemory(objName->Buffer, pNameInfo->Name.Length + sizeof(WCHAR));
+					objName->Length = 0;
+					objName->MaximumLength = pNameInfo->Name.Length;
+					RtlCopyUnicodeString(objName, &pNameInfo->Name);
+				}
+				else
+					status = STATUS_INSUFFICIENT_RESOURCES;
+
+			}
+			else
+				RtlCopyUnicodeString(objName, &pNameInfo->Name);
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		status = GetExceptionCode();
+	}
+
+	if (buffer)
+	{
+		ExFreePool(buffer);
+		buffer = NULL;
+	}
+
+	return NT_SUCCESS(status);
+}
+
 
 BOOL obQueryObjectName(PVOID pObject, PUNICODE_STRING objName, BOOL allocateName)
 {
